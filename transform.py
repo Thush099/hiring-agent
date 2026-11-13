@@ -1,5 +1,4 @@
 from typing import Dict, List, Optional
-import pdb
 from models import JSONResume
 
 
@@ -126,17 +125,18 @@ def transform_basics(basics_data: Dict) -> Dict:
     if not isinstance(basics_data, dict):
         return basics_data
 
-    profiles = basics_data.get("profiles", [])
+    basics_copy = dict(basics_data)
+    profiles = basics_copy.get("profiles", [])
 
     transformed_profiles = []
     if isinstance(profiles, list):
-        for i, profile in enumerate(profiles):
+        for profile in profiles:
             if isinstance(profile, dict):
                 transformed_profile = profile.copy()
                 url = transformed_profile.get("url", "")
                 network = transformed_profile.get("network")
 
-                if url and network is None:
+                if url and not network:
                     domain = extract_domain_from_url(url)
                     network_name = get_network_name(domain)
 
@@ -147,8 +147,8 @@ def transform_basics(basics_data: Dict) -> Dict:
                             transformed_profile["username"] = username
                 transformed_profiles.append(transformed_profile)
 
-    basics_data["profiles"] = transformed_profiles
-    return basics_data
+    basics_copy["profiles"] = transformed_profiles
+    return basics_copy
 
 
 def extract_username_from_url(url: str, domain: str) -> str:
@@ -248,20 +248,21 @@ def transform_education(edu_list: List) -> List[Dict]:
                 if score is not None:
                     score = str(score)
 
+                degree = item.get("degree") or ""
                 start_date, end_date = parse_date_range(item.get("years", ""))
                 transformed.append(
                     {
                         "institution": item.get("institution", ""),
                         "url": item.get("url", None),
                         "area": (
-                            item.get("degree", "").split(", ")[-1]
-                            if "," in item.get("degree", "")
+                            degree.split(", ")[-1]
+                            if "," in degree
                             else None
                         ),
                         "studyType": (
-                            item.get("degree", "").split(", ")[0]
-                            if "," in item.get("degree", "")
-                            else item.get("degree", "")
+                            degree.split(", ")[0]
+                            if "," in degree
+                            else degree
                         ),
                         "startDate": start_date,
                         "endDate": end_date,
@@ -315,13 +316,13 @@ def transform_projects(projects_list: List) -> List[Dict]:
     for item in projects_list:
         if isinstance(item, dict):
             skills = []
-            project_name = item.get("name", "")
+            project_name = item.get("name") or ""
             if "|" in project_name:
                 name_parts = project_name.split("|")
                 if len(name_parts) > 1:
                     skills_part = name_parts[1].strip()
                     skills = [skill.strip() for skill in skills_part.split(",")]
-                    item["name"] = name_parts[0].strip()
+                    project_name = name_parts[0].strip()
 
             technologies = item.get("technologies", [])
             if isinstance(technologies, str):
@@ -332,7 +333,7 @@ def transform_projects(projects_list: List) -> List[Dict]:
 
             transformed.append(
                 {
-                    "name": item.get("name", ""),
+                    "name": project_name,
                     "startDate": None,
                     "endDate": None,
                     "description": item.get("description", ""),
@@ -385,17 +386,17 @@ def transform_projects_comprehensive(parsed_data: Dict) -> List[Dict]:
         for item in parsed_data["projectsOpenSource"]:
             if isinstance(item, dict):
                 skills = []
-                project_name = item.get("name", "")
+                project_name = item.get("name") or ""
                 if "|" in project_name:
                     name_parts = project_name.split("|")
                     if len(name_parts) > 1:
                         skills_part = name_parts[1].strip()
                         skills = [skill.strip() for skill in skills_part.split(",")]
-                        item["name"] = name_parts[0].strip()
+                        project_name = name_parts[0].strip()
 
                 projects.append(
                     {
-                        "name": item.get("name", ""),
+                        "name": project_name,
                         "startDate": None,
                         "endDate": None,
                         "description": item.get("summary", ""),
@@ -513,13 +514,15 @@ def transform_evaluation_response(
     csv_row["file_name"] = file_name
 
     # Extract basic information from resume_data
-    if resume_data and hasattr(resume_data, "basics") and resume_data.basics:
+    if resume_data and getattr(resume_data, "basics", None) is not None:
         basics = resume_data.basics
         csv_row["name"] = basics.name if basics.name else ""
         csv_row["email"] = basics.email if basics.email else ""
         csv_row["phone"] = basics.phone if basics.phone else ""
         csv_row["location"] = (
-            f"{basics.location.city}, {basics.location.region}"
+            ", ".join(
+                part for part in (basics.location.city, basics.location.region) if part
+            )
             if basics.location
             else ""
         )
@@ -592,6 +595,12 @@ def transform_evaluation_response(
             for prefix in ["github", "linkedin", "twitter", "dev", "behance"]:
                 csv_row[f"{prefix}_url"] = ""
                 csv_row[f"{prefix}_username"] = ""
+    else:
+        for key in ["name", "email", "phone", "location", "summary"]:
+            csv_row[key] = ""
+        for prefix in ["github", "linkedin", "twitter", "dev", "behance"]:
+            csv_row[f"{prefix}_url"] = ""
+            csv_row[f"{prefix}_username"] = ""
 
     # Extract work experience summary
     if resume_data and hasattr(resume_data, "work") and resume_data.work:
@@ -672,7 +681,8 @@ def transform_evaluation_response(
 
     # Extract evaluation scores (one pair of columns per role category)
     category_keys = [c.key for c in role.categories] if role else []
-    if evaluation and hasattr(evaluation, "scores"):
+    role_max_by_key = {c.key: c.max for c in role.categories} if role else {}
+    if evaluation and getattr(evaluation, "scores", None) is not None:
         scores = evaluation.scores
         total_score = 0
         total_max = 0
@@ -682,10 +692,12 @@ def transform_evaluation_response(
                 csv_row[f"{key}_score"] = "N/A"
                 csv_row[f"{key}_max"] = "N/A"
                 continue
-            csv_row[f"{key}_score"] = cat.score
-            csv_row[f"{key}_max"] = cat.max
-            total_score += cat.score
-            total_max += cat.max
+            authoritative_max = role_max_by_key.get(key, cat.max)
+            capped_score = min(max(cat.score, 0), authoritative_max)
+            csv_row[f"{key}_score"] = capped_score
+            csv_row[f"{key}_max"] = authoritative_max
+            total_score += capped_score
+            total_max += authoritative_max
 
         csv_row["total_score"] = total_score
         csv_row["total_max"] = total_max
@@ -697,27 +709,31 @@ def transform_evaluation_response(
         csv_row["total_max"] = "N/A"
 
     # Extract bonus points and deductions
-    if evaluation and hasattr(evaluation, "bonus_points"):
-        csv_row["bonus_points"] = evaluation.bonus_points.total
+    bonus_cap = role.bonus_max if role else None
+    if evaluation and getattr(evaluation, "bonus_points", None) is not None:
+        bonus_total = max(evaluation.bonus_points.total, 0)
+        if bonus_cap is not None:
+            bonus_total = min(bonus_total, bonus_cap)
+        csv_row["bonus_points"] = bonus_total
         csv_row["bonus_breakdown"] = evaluation.bonus_points.breakdown
     else:
         csv_row["bonus_points"] = 0
         csv_row["bonus_breakdown"] = ""
 
-    if evaluation and hasattr(evaluation, "deductions"):
-        csv_row["deductions"] = evaluation.deductions.total
+    if evaluation and getattr(evaluation, "deductions", None) is not None:
+        csv_row["deductions"] = max(evaluation.deductions.total, 0)
         csv_row["deduction_reasons"] = evaluation.deductions.reasons
     else:
         csv_row["deductions"] = 0
         csv_row["deduction_reasons"] = ""
 
     # Extract key strengths and areas for improvement
-    if evaluation and hasattr(evaluation, "key_strengths"):
+    if evaluation and getattr(evaluation, "key_strengths", None):
         csv_row["key_strengths"] = "; ".join(evaluation.key_strengths)
     else:
         csv_row["key_strengths"] = ""
 
-    if evaluation and hasattr(evaluation, "areas_for_improvement"):
+    if evaluation and getattr(evaluation, "areas_for_improvement", None):
         csv_row["areas_for_improvement"] = "; ".join(evaluation.areas_for_improvement)
     else:
         csv_row["areas_for_improvement"] = ""

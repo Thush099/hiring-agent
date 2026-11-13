@@ -22,6 +22,7 @@ if sys.platform == "win32":
         sys.stderr.reconfigure(encoding="utf-8")
 
 import argparse
+from dataclasses import dataclass
 
 from pdf import PDFHandler
 from github import fetch_and_display_github_info
@@ -47,6 +48,145 @@ logging.basicConfig(
 )
 
 
+@dataclass(frozen=True)
+class CategoryScoreBreakdown:
+    """Normalized breakdown for a single rubric category."""
+
+    key: str
+    label: str
+    icon: str
+    raw_score: float
+    capped_score: float
+    role_max: int
+    reported_max: Optional[int]
+    was_capped: bool
+    max_mismatch: bool
+    evidence: str
+
+
+@dataclass(frozen=True)
+class ScoreBreakdown:
+    """Deterministic score aggregation and clamping result for an evaluation."""
+
+    categories: List[CategoryScoreBreakdown]
+    base_score: float
+    max_base_score: int
+    bonus_score: float
+    deduction_score: float
+    unclamped_total: float
+    total_score: float
+    min_final_score: int
+    max_final_score: int
+    was_clamped_high: bool
+    was_clamped_low: bool
+    weighted_base_pct: float
+
+
+def compute_evaluation_score(evaluation, role: Role) -> ScoreBreakdown:
+    """Compute authoritative rubric totals and clamp scores against ``role`` bounds.
+
+    Category scores are clamped to ``[0, category.max]`` using the authoritative
+    ``role.categories`` definitions (ignoring any mismatched ``max`` reported by
+    an LLM), bonuses are clamped to ``[0, role.bonus_max]``, deductions are
+    clamped to ``>= 0``, and the final score is clamped to
+    ``[role.min_final_score, role.max_final_score]``.
+    """
+    scores_obj = getattr(evaluation, "scores", None)
+    category_breakdowns: List[CategoryScoreBreakdown] = []
+    base_score = 0.0
+    max_base_score = 0
+
+    for category in role.categories:
+        cat_entry = getattr(scores_obj, category.key, None) if scores_obj is not None else None
+        if cat_entry is None and isinstance(scores_obj, dict):
+            cat_entry = scores_obj.get(category.key)
+
+        if cat_entry is None:
+            raw_score = 0.0
+            reported_max = None
+            evidence = ""
+        elif isinstance(cat_entry, dict):
+            raw_score = float(cat_entry.get("score", 0.0))
+            reported_max = cat_entry.get("max")
+            evidence = str(cat_entry.get("evidence", ""))
+        else:
+            raw_score = float(getattr(cat_entry, "score", 0.0))
+            reported_max = getattr(cat_entry, "max", None)
+            evidence = str(getattr(cat_entry, "evidence", ""))
+
+        capped_score = min(max(raw_score, 0.0), float(category.max))
+        was_capped = capped_score != raw_score
+        max_mismatch = reported_max is not None and int(reported_max) != category.max
+
+        base_score += capped_score
+        max_base_score += category.max
+        category_breakdowns.append(
+            CategoryScoreBreakdown(
+                key=category.key,
+                label=category.label,
+                icon=category.icon,
+                raw_score=raw_score,
+                capped_score=capped_score,
+                role_max=category.max,
+                reported_max=int(reported_max) if reported_max is not None else None,
+                was_capped=was_capped,
+                max_mismatch=max_mismatch,
+                evidence=evidence,
+            )
+        )
+
+    bonus_obj = getattr(evaluation, "bonus_points", None)
+    raw_bonus = 0.0
+    if bonus_obj is not None:
+        raw_bonus = float(
+            bonus_obj.get("total", 0.0)
+            if isinstance(bonus_obj, dict)
+            else getattr(bonus_obj, "total", 0.0)
+        )
+    bonus_score = min(max(raw_bonus, 0.0), float(role.bonus_max))
+
+    deduction_obj = getattr(evaluation, "deductions", None)
+    raw_deduction = 0.0
+    if deduction_obj is not None:
+        raw_deduction = float(
+            deduction_obj.get("total", 0.0)
+            if isinstance(deduction_obj, dict)
+            else getattr(deduction_obj, "total", 0.0)
+        )
+    deduction_score = max(raw_deduction, 0.0)
+
+    unclamped_total = base_score + bonus_score - deduction_score
+    total_score = unclamped_total
+    was_clamped_high = False
+    was_clamped_low = False
+
+    if total_score > role.max_final_score:
+        total_score = float(role.max_final_score)
+        was_clamped_high = True
+    if total_score < role.min_final_score:
+        total_score = float(role.min_final_score)
+        was_clamped_low = True
+
+    weighted_base_pct = (
+        (base_score / max_base_score) * 100.0 if max_base_score > 0 else 0.0
+    )
+
+    return ScoreBreakdown(
+        categories=category_breakdowns,
+        base_score=base_score,
+        max_base_score=max_base_score,
+        bonus_score=bonus_score,
+        deduction_score=deduction_score,
+        unclamped_total=unclamped_total,
+        total_score=total_score,
+        min_final_score=role.min_final_score,
+        max_final_score=role.max_final_score,
+        was_clamped_high=was_clamped_high,
+        was_clamped_low=was_clamped_low,
+        weighted_base_pct=weighted_base_pct,
+    )
+
+
 def print_evaluation_results(
     evaluation, role: Role, candidate_name: str = "Candidate"
 ):
@@ -59,56 +199,36 @@ def print_evaluation_results(
         print("❌ No evaluation data available")
         return
 
-    # Calculate overall score
-    total_score = 0
-    max_score = 0
+    breakdown = compute_evaluation_score(evaluation, role)
 
-    if hasattr(evaluation, "scores") and evaluation.scores:
-        for category_name, category_data in evaluation.scores.model_dump().items():
-            category_score = min(category_data["score"], category_data["max"])
-            total_score += category_score
-            max_score += category_data["max"]
+    for cat in breakdown.categories:
+        if cat.was_capped:
+            print(
+                f"⚠️  Warning: {cat.key} score capped from {cat.raw_score} to {cat.capped_score} (max: {cat.role_max})"
+            )
 
-            # Log warning if score was capped
-            if category_score < category_data["score"]:
-                print(
-                    f"⚠️  Warning: {category_name} score capped from {category_data['score']} to {category_score} (max: {category_data['max']})"
-                )
-
-    # Add bonus points
-    if hasattr(evaluation, "bonus_points") and evaluation.bonus_points:
-        total_score += evaluation.bonus_points.total
-
-    # Subtract deductions
-    if hasattr(evaluation, "deductions") and evaluation.deductions:
-        total_score -= evaluation.deductions.total
-
-    # Ensure total score doesn't exceed maximum possible score
-    max_possible_score = max_score + role.bonus_max
-    if total_score > max_possible_score:
-        total_score = max_possible_score
-        print(f"⚠️  Warning: Total score capped at maximum possible value")
+    if breakdown.was_clamped_high:
+        print("⚠️  Warning: Total score capped at maximum possible value")
+    if breakdown.was_clamped_low:
+        print("⚠️  Warning: Total score clamped at minimum possible value")
 
     # Overall Score
-    print(f"\n🎯 OVERALL SCORE: {total_score:.1f}/{max_score}")
+    print(f"\n🎯 OVERALL SCORE: {breakdown.total_score:.1f}/{breakdown.max_base_score}")
 
     # Detailed Scores
     print("\n📈 DETAILED SCORES:")
     print("-" * 60)
 
-    if hasattr(evaluation, "scores") and evaluation.scores:
-        for category in role.categories:
-            cat_score = getattr(evaluation.scores, category.key, None)
-            if not cat_score:
-                continue
-            capped_score = min(cat_score.score, category.max)
-            print(f"{category.icon} {category.label}: {capped_score}/{cat_score.max}")
-            print(f"   Evidence: {cat_score.evidence}")
-            print()
+    for cat in breakdown.categories:
+        if not cat.evidence and cat.raw_score == 0.0 and cat.reported_max is None:
+            continue
+        print(f"{cat.icon} {cat.label}: {cat.capped_score}/{cat.role_max}")
+        print(f"   Evidence: {cat.evidence}")
+        print()
 
     # Bonus Points
     if hasattr(evaluation, "bonus_points") and evaluation.bonus_points:
-        print(f"\n⭐ BONUS POINTS: {evaluation.bonus_points.total}")
+        print(f"\n⭐ BONUS POINTS: {breakdown.bonus_score}")
         print("-" * 30)
         print(f"   {evaluation.bonus_points.breakdown}")
 
@@ -116,9 +236,9 @@ def print_evaluation_results(
     if (
         hasattr(evaluation, "deductions")
         and evaluation.deductions
-        and evaluation.deductions.total > 0
+        and breakdown.deduction_score > 0
     ):
-        print(f"\n⚠️  DEDUCTIONS: -{evaluation.deductions.total}")
+        print(f"\n⚠️  DEDUCTIONS: -{breakdown.deduction_score}")
         print("-" * 30)
         if evaluation.deductions.reasons:
             print(f"   {evaluation.deductions.reasons}")
@@ -149,6 +269,7 @@ def _evaluate_resume(
     evaluation_model,
     github_data: dict = None,
     blog_data: dict = None,
+    provider=None,
 ):
     """Evaluate the resume using AI and display results."""
 
@@ -158,6 +279,7 @@ def _evaluate_resume(
         evaluation_model=evaluation_model,
         model_name=DEFAULT_MODEL,
         model_params=model_params,
+        provider=provider,
     )
 
     # Convert JSON resume data to text

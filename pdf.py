@@ -3,7 +3,13 @@ import sys
 import json
 import time
 import logging
-import pymupdf
+
+try:
+    import pymupdf
+    from pymupdf_rag import to_markdown
+except ImportError:  # pragma: no cover - allows importing score/github without pymupdf
+    pymupdf = None
+    to_markdown = None
 
 from models import (
     JSONResume,
@@ -19,9 +25,9 @@ from models import (
     SkillsSection,
     ProjectsSection,
     AwardsSection,
+    LLMProvider,
 )
 from llm_utils import initialize_llm_provider, extract_json_from_response
-from pymupdf_rag import to_markdown
 from typing import List, Optional, Dict, Any
 from prompt import (
     DEFAULT_MODEL,
@@ -34,9 +40,12 @@ logger = logging.getLogger(__name__)
 
 
 class PDFHandler:
-    def __init__(self):
+    def __init__(self, provider: Optional[LLMProvider] = None):
         self.template_manager = TemplateManager()
-        self._initialize_llm_provider()
+        if provider is not None:
+            self.provider = provider
+        else:
+            self._initialize_llm_provider()
 
     def _initialize_llm_provider(self):
         """Initialize the appropriate LLM provider based on the model."""
@@ -44,6 +53,10 @@ class PDFHandler:
 
     def extract_text_from_pdf(self, pdf_path: str) -> Optional[str]:
         try:
+            if pymupdf is None or to_markdown is None:
+                raise ImportError(
+                    "pymupdf is required for PDF extraction. Install dependencies from requirements.txt."
+                )
             if not os.path.exists(pdf_path):
                 raise FileNotFoundError(f"PDF file not found: {pdf_path}")
 

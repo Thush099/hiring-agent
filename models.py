@@ -226,14 +226,25 @@ class JSONResume(BaseModel):
 
 
 class CategoryScore(BaseModel):
-    score: float = Field(ge=0, description="Score achieved in this category")
+    score: float = Field(
+        ge=0, allow_inf_nan=False, description="Score achieved in this category"
+    )
     max: int = Field(gt=0, description="Maximum possible score")
     evidence: str = Field(min_length=1, description="Evidence supporting the score")
+
+    @field_validator("evidence")
+    @classmethod
+    def _evidence_not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("evidence must not be empty or whitespace")
+        return stripped
 
 
 class Deductions(BaseModel):
     total: float = Field(
         ge=0,
+        allow_inf_nan=False,
         description="Total deduction points (stored as positive, applied as negative)",
     )
     reasons: str = Field(description="Reasons for deductions")
@@ -251,6 +262,14 @@ class BonusItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     points: int = Field(ge=0)
     evidence: str = Field(min_length=1)
+
+    @field_validator("evidence")
+    @classmethod
+    def _evidence_not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("evidence must not be empty or whitespace")
+        return stripped
 
 
 class RankedBonusItem(BonusItem):
@@ -393,8 +412,8 @@ def build_evaluation_model(role) -> Type[BaseModel]:
         scores=(scores_model, ...),
         bonus_points=(bonus_model, ...),
         deductions=(Deductions, ...),
-        key_strengths=(List[str], Field(min_items=1, max_items=5)),
-        areas_for_improvement=(List[str], Field(min_items=1, max_items=5)),
+        key_strengths=(List[str], Field(min_length=1, max_length=5)),
+        areas_for_improvement=(List[str], Field(min_length=1, max_length=5)),
     )
 
 
@@ -520,9 +539,18 @@ class OpenAICompatibleProvider:
                     request=response.request,
                     response=response,
                 ) from exc
-            data = response.json()
+            try:
+                data = response.json()
+            except ValueError as exc:
+                raise ValueError(
+                    f"Non-JSON response from {url} (status {response.status_code}): {response.text[:300]}"
+                ) from exc
             try:
                 content = data["choices"][0]["message"]["content"]
             except (KeyError, IndexError, TypeError):
                 raise ValueError(f"Unexpected response shape from {url}: {data}")
+            if not isinstance(content, str):
+                raise ValueError(
+                    f"Missing string message content in response from {url}: {data}"
+                )
             return {"message": {"role": "assistant", "content": content}}

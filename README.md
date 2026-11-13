@@ -292,6 +292,10 @@ $ python score.py ./resume/sample.pdf --role backend_engineer
 (it only scaffolds; it does not score a resume). You can also copy an existing
 role directory instead.
 
+### Offline calibration & fairness audit
+
+Run the offline rubric calibration, evidence-span, and counterfactual fairness audit CLI (`python calibration_audit.py`) or `pytest` without API keys; see [docs/OFFLINE_AUDIT.md](./docs/OFFLINE_AUDIT.md) for details.
+
 ---
 
 ## Directory layout

@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional, Tuple, Any
 from pydantic import BaseModel, Field, field_validator
-from models import JSONResume
+from models import JSONResume, LLMProvider
 from llm_utils import initialize_llm_provider, extract_json_from_response
 import logging
 import json
@@ -21,7 +21,8 @@ class ResumeEvaluator:
         role,
         evaluation_model,
         model_name: str = DEFAULT_MODEL,
-        model_params: dict = None,
+        model_params: Optional[dict] = None,
+        provider: Optional[LLMProvider] = None,
     ):
         if not model_name:
             raise ValueError("Model name cannot be empty")
@@ -29,11 +30,16 @@ class ResumeEvaluator:
         self.role = role
         self.evaluation_model = evaluation_model
         self.model_name = model_name
-        self.model_params = model_params or MODEL_PARAMETERS.get(
-            model_name, {"temperature": 0.5, "top_p": 0.9}
+        self.model_params = (
+            model_params
+            if model_params is not None
+            else MODEL_PARAMETERS.get(model_name, {"temperature": 0.5, "top_p": 0.9})
         )
         self.template_manager = TemplateManager()
-        self._initialize_llm_provider()
+        if provider is not None:
+            self.provider = provider
+        else:
+            self._initialize_llm_provider()
 
     def _initialize_llm_provider(self):
         """Initialize the appropriate LLM provider based on the model."""
@@ -47,7 +53,6 @@ class ResumeEvaluator:
     def evaluate_resume(self, resume_text: str) -> BaseModel:
         self._last_resume_text = resume_text
         full_prompt = self._load_evaluation_prompt(resume_text)
-        # logger.info(f"🔤 Evaluation prompt being sent: {full_prompt}")
         try:
             system_message = self.template_manager.render_string(
                 self.role.system_message_source,
@@ -73,9 +78,17 @@ class ResumeEvaluator:
             # Use the appropriate provider to make the API call
             response = self.provider.chat(**chat_params, **kwargs)
 
-            response_text = response["message"]["content"]
-            response_text = extract_json_from_response(response_text)
-            logger.error(f"🔤 Prompt response: {response_text}")
+            if not isinstance(response, dict) or not isinstance(
+                response.get("message"), dict
+            ):
+                raise ValueError(f"Malformed provider response shape: {response!r}")
+
+            raw_content = response["message"].get("content")
+            if raw_content is None:
+                raise ValueError("Provider response message content is None")
+
+            response_text = extract_json_from_response(raw_content)
+            logger.debug(f"🔤 Prompt response: {response_text}")
 
             evaluation_dict = json.loads(response_text)
             evaluation_data = self.evaluation_model(**evaluation_dict)
