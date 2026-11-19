@@ -375,6 +375,20 @@ def test_score_aggregation_clamping_normalization_and_tiers(capsys):
             category_weights={**equal_weights, "open_source": -1.0},
         )
 
+    with pytest.raises(ValueError, match="Unknown category weight"):
+        normalize_weighted_criteria(
+            bd,
+            role,
+            category_weights={**equal_weights, "open_soruce": 1.0},
+        )
+
+    with pytest.raises(ValueError, match="Sum of category weights"):
+        normalize_weighted_criteria(
+            bd,
+            role,
+            category_weights={category.key: 1e308 for category in role.categories},
+        )
+
     assert classify_tier(85.0) == TIER_STRONG
     assert classify_tier(65.0) == TIER_ADVANCE
     assert classify_tier(45.0) == TIER_BORDERLINE
