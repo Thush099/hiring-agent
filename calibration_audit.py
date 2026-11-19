@@ -381,6 +381,8 @@ def classify_tier(
     normalized_score: float, thresholds: Optional[TierThresholds] = None
 ) -> str:
     """Classify a 0-100 normalized score into a deterministic hiring triage tier."""
+    if not math.isfinite(normalized_score):
+        raise ValueError("Normalized score must be finite")
     th = thresholds or TierThresholds()
     if normalized_score >= th.strong_hire:
         return TIER_STRONG
