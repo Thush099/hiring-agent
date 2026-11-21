@@ -381,6 +381,8 @@ def classify_tier(
     normalized_score: float, thresholds: Optional[TierThresholds] = None
 ) -> str:
     """Classify a 0-100 normalized score into a deterministic hiring triage tier."""
+    if not math.isfinite(normalized_score):
+        raise ValueError("Normalized score must be finite")
     th = thresholds or TierThresholds()
     if normalized_score >= th.strong_hire:
         return TIER_STRONG
@@ -410,6 +412,12 @@ def normalize_weighted_criteria(
         total_max = sum(c.max for c in role.categories)
         raw_weights = {c.key: c.max / total_max for c in role.categories}
     else:
+        valid_category_keys = {cat.key for cat in role.categories}
+        unknown_keys = set(category_weights) - valid_category_keys
+        if unknown_keys:
+            raise ValueError(
+                f"Unknown category weight key(s): {', '.join(sorted(unknown_keys))}"
+            )
         raw_weights = {}
         for cat in role.categories:
             if cat.key not in category_weights:
@@ -424,8 +432,8 @@ def normalize_weighted_criteria(
             raw_weights[cat.key] = weight
 
     weight_sum = sum(raw_weights.values())
-    if weight_sum <= 0.0:
-        raise ValueError("Sum of category weights must be strictly positive")
+    if not math.isfinite(weight_sum) or weight_sum <= 0.0:
+        raise ValueError("Sum of category weights must be finite and strictly positive")
 
     norm_weights = {k: v / weight_sum for k, v in raw_weights.items()}
     by_key = {cat.key: cat for cat in breakdown.categories}

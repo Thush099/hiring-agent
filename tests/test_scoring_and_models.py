@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -375,10 +376,54 @@ def test_score_aggregation_clamping_normalization_and_tiers(capsys):
             category_weights={**equal_weights, "open_source": -1.0},
         )
 
+    with pytest.raises(ValueError, match="Unknown category weight"):
+        normalize_weighted_criteria(
+            bd,
+            role,
+            category_weights={**equal_weights, "open_soruce": 1.0},
+        )
+
+    with pytest.raises(ValueError, match="Sum of category weights"):
+        normalize_weighted_criteria(
+            bd,
+            role,
+            category_weights={category.key: 1e308 for category in role.categories},
+        )
+
     assert classify_tier(85.0) == TIER_STRONG
     assert classify_tier(65.0) == TIER_ADVANCE
     assert classify_tier(45.0) == TIER_BORDERLINE
     assert classify_tier(20.0) == TIER_BELOW_CUTOFF
+
+
+@pytest.mark.parametrize("invalid_score", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize("field", ["category", "bonus", "deduction"])
+def test_score_aggregation_rejects_non_finite_dict_values(field, invalid_score):
+    role = load_role("software_engineering_intern")
+    scores = {
+        category.key: {"score": 0, "max": category.max, "evidence": "Evidence"}
+        for category in role.categories
+    }
+    bonus = {"total": 0}
+    deductions = {"total": 0}
+    if field == "category":
+        scores[role.categories[0].key]["score"] = invalid_score
+    elif field == "bonus":
+        bonus["total"] = invalid_score
+    else:
+        deductions["total"] = invalid_score
+
+    evaluation = SimpleNamespace(
+        scores=scores, bonus_points=bonus, deductions=deductions
+    )
+    with pytest.raises(ValueError, match="finite"):
+        compute_evaluation_score(evaluation, role)
+
+
+def test_classify_tier_rejects_non_finite_scores():
+    for score in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="finite"):
+            classify_tier(score)
 
 
 def test_transform_defensive_none_and_non_mutation():

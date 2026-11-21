@@ -47,6 +47,7 @@ Thanks for your interest in improving this project. Contributions are welcome, i
 
 ### Tests and Smoke Checks
 
+* Run the offline test suite before submitting changes: `python -m pytest -q`.
 * Validate changes with a couple of real resumes under different providers when possible:
 
   * One run with Ollama using the default local model.

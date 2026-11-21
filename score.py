@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import math
 
 # Fix for Windows Console Unicode errors
 if sys.platform == "win32":
@@ -114,6 +115,9 @@ def compute_evaluation_score(evaluation, role: Role) -> ScoreBreakdown:
             reported_max = getattr(cat_entry, "max", None)
             evidence = str(getattr(cat_entry, "evidence", ""))
 
+        if not math.isfinite(raw_score):
+            raise ValueError(f"Score for category '{category.key}' must be finite")
+
         capped_score = min(max(raw_score, 0.0), float(category.max))
         was_capped = capped_score != raw_score
         max_mismatch = reported_max is not None and int(reported_max) != category.max
@@ -143,6 +147,8 @@ def compute_evaluation_score(evaluation, role: Role) -> ScoreBreakdown:
             if isinstance(bonus_obj, dict)
             else getattr(bonus_obj, "total", 0.0)
         )
+    if not math.isfinite(raw_bonus):
+        raise ValueError("Bonus score must be finite")
     bonus_score = min(max(raw_bonus, 0.0), float(role.bonus_max))
 
     deduction_obj = getattr(evaluation, "deductions", None)
@@ -153,6 +159,8 @@ def compute_evaluation_score(evaluation, role: Role) -> ScoreBreakdown:
             if isinstance(deduction_obj, dict)
             else getattr(deduction_obj, "total", 0.0)
         )
+    if not math.isfinite(raw_deduction):
+        raise ValueError("Deduction score must be finite")
     deduction_score = max(raw_deduction, 0.0)
 
     unclamped_total = base_score + bonus_score - deduction_score
