@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rubric Scoring Workbench — auditable breakdown</title>
+<style>
+  :root {
+    --bg: #f4f2ee;
+    --card: #ffffff;
+    --ink: #22252b;
+    --ink-soft: #62666e;
+    --rule: #d4d0c8;
+    --good: #2f8f6b;
+    --warn: #c98a2b;
+    --bad: #c0483c;
+    --accent: #2c4a6e;
+    --mono: "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); }
+  header { padding: 28px 26px 18px; background: var(--card); border-bottom: 3px solid var(--accent); }
+  header h1 { margin: 0; font: 600 clamp(21px, 3.2vw, 30px)/1.15 var(--sans); letter-spacing: -.015em; }
+  header h1 em { font-style: normal; color: var(--accent); }
+  header p { margin: 9px 0 0; max-width: 74ch; color: var(--ink-soft); font-size: 14.5px; }
+  .notice {
+    margin: 14px 26px 0; padding: 11px 15px; border-left: 4px solid var(--warn);
+    background: #faf3e4; color: #6b5220; font-size: 13px;
+  }
+  .layout { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 20px; padding: 18px 26px 56px; }
+  @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+  .panel { background: var(--card); border: 1px solid var(--rule); border-radius: 5px; padding: 18px 20px; }
+  .panel + .panel { margin-top: 16px; }
+  .panel h2 { margin: 0 0 3px; font: 600 17px/1.25 var(--sans); }
+  .meta { margin: 0 0 12px; color: var(--ink-soft); font-size: 12.5px; }
+  label { display: block; font: 600 11px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-soft); margin: 13px 0 6px; }
+  select, input[type="number"], textarea {
+    width: 100%; border: 1px solid var(--rule); border-radius: 4px; background: #fdfdfe;
+    color: var(--ink); font: 13px/1.5 var(--mono); padding: 8px 10px;
+  }
+  textarea { resize: vertical; min-height: 48px; }
+  select:focus-visible, input:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .cat-row { display: grid; grid-template-columns: 1fr 82px; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .cat-row .name { font: 600 13px var(--sans); }
+  .cat-row .name small { display: block; color: var(--ink-soft); font-weight: 400; font-size: 11px; }
+  .btnrow { margin-top: 16px; }
+  button { width: 100%; border: 0; border-radius: 4px; cursor: pointer; padding: 12px 14px; font: 600 14.5px/1 var(--sans); background: var(--accent); color: #fff; }
+  button:hover { background: #223b58; }
+  button:disabled { opacity: .55; cursor: wait; }
+  .error { margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--bad); background: #f6e2df; color: var(--bad); font-size: 13px; white-space: pre-wrap; }
+
+  .statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
+  .stat { background: var(--card); padding: 13px 15px; }
+  .stat .k { font: 600 10.5px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); }
+  .stat .v { font: 600 23px/1.15 var(--mono); margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .stat .v.good { color: var(--good); } .stat .v.warn { color: var(--warn); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font: 600 10.5px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--ink-soft); background: #eef1f4; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font: 600 10.5px/1.7 var(--sans); }
+  .pill.capped { background: #faf3e4; color: var(--warn); }
+  .pill.mismatch { background: #f6e2df; color: var(--bad); }
+  .pill.ok { background: #dcefe4; color: var(--good); }
+  .bar { height: 7px; border-radius: 4px; background: var(--rule); overflow: hidden; margin-top: 6px; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+  .wrap { overflow-x: auto; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; font-size: 12.5px; color: var(--accent); font-weight: 600; }
+  pre { background: #1e2228; color: #dfe4ea; padding: 12px; border-radius: 4px; overflow: auto; font: 11px/1.5 var(--mono); max-height: 300px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Rubric scoring <em>workbench</em></h1>
+  <p>Enter raw category scores for a role and see exactly how the deterministic aggregation
+  works: per-category clamping to role bounds, bonus and deduction handling, and the final
+  clamp to the role's score range — with every step visible for audit.</p>
+</header>
+
+<div class="notice">
+  This tool computes and explains a rubric score. It does not make hiring decisions. Any
+  outcome requires human review of the evidence behind each score.
+</div>
+
+<div class="layout">
+  <form class="panel" id="form">
+    <h2>Scoring input</h2>
+    <p class="meta">Runs <code>compute_evaluation_score()</code> from <code>score.py</code>.</p>
+
+    <label for="role">Role</label>
+    <select id="role"></select>
+
+    <label>Category scores</label>
+    <div id="categories"></div>
+
+    <label for="bonus">Bonus points</label>
+    <input type="number" id="bonus" value="0" step="1">
+    <label for="deduction">Deduction points</label>
+    <input type="number" id="deduction" value="0" step="1">
+
+    <div class="btnrow">
+      <button type="submit" id="run">Compute score</button>
+    </div>
+    <div class="error" id="error" hidden></div>
+  </form>
+
+  <section>
+    <div class="panel" id="summary-panel" hidden>
+      <h2>Total score</h2>
+      <p class="meta" id="summary-meta"></p>
+      <div class="statgrid" id="statgrid"></div>
+    </div>
+
+    <div class="panel" id="breakdown-panel" hidden>
+      <h2>Category breakdown</h2>
+      <p class="meta">Bars show capped score against the role's category max.</p>
+      <div class="wrap"><table id="breakdown-table"></table></div>
+    </div>
+
+    <div class="panel" id="clamping-panel" hidden>
+      <h2>Clamping audit</h2>
+      <div class="wrap"><table id="clamping-table"></table></div>
+    </div>
+
+    <details id="raw-details" hidden>
+      <summary>Show raw JSON result</summary>
+      <pre id="raw"></pre>
+    </details>
+  </section>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const num = (x, d = 1) => x == null ? "—" : Number(x).toFixed(d);
+
+  let roleMeta = null;
+
+  async function loadRoles() {
+    const res = await fetch("/api/health");
+    const payload = await res.json();
+    const roles = payload.roles || [];
+    $("role").innerHTML = roles.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+    await renderCategories();
+  }
+
+  async function renderCategories() {
+    // Score a zero run to discover the role's category structure.
+    const role = $("role").value;
+    if (!role) return;
+    const res = await fetch("/api/score", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role_name: role, scores: {} }),
+    });
+    const payload = await res.json();
+    if (!res.ok) return;
+    roleMeta = payload;
+    $("categories").innerHTML = payload.categories.map((c) =>
+      `<div class="cat-row">
+        <div class="name">${esc(c.icon)} ${esc(c.label)}<small>max ${c.role_max}</small></div>
+        <div><input type="number" class="cat-score" data-key="${esc(c.key)}" value="0" min="0" step="1"></div>
+      </div>`).join("");
+  }
+
+  function renderSummary(r) {
+    const clamped = r.was_clamped_high || r.was_clamped_low;
+    const stats = [
+      ["Total score", num(r.total_score), r.was_clamped_high ? "warn" : "good"],
+      ["Range", `${r.min_final_score} … ${r.max_final_score}`],
+      ["Base", `${num(r.base_score)} / ${r.max_base_score}`],
+      ["Weighted base", `${num(r.weighted_base_pct)}%`],
+      ["Bonus", num(r.bonus_score)],
+      ["Deduction", num(r.deduction_score)],
+    ];
+    $("statgrid").innerHTML = stats.map(([k, v, cls]) =>
+      `<div class="stat"><div class="k">${esc(k)}</div><div class="v ${cls || ""}">${esc(v)}</div></div>`).join("");
+    $("summary-meta").textContent =
+      `${r.position_title} · unclamped total ${num(r.unclamped_total)}` +
+      (clamped ? " · clamped to role range" : " · within role range");
+    $("summary-panel").hidden = false;
+  }
+
+  function renderBreakdown(r) {
+    $("breakdown-table").innerHTML =
+      `<thead><tr><th>Category</th><th>Raw</th><th>Capped</th><th>Max</th><th>Flags</th></tr></thead><tbody>` +
+      r.categories.map((c) => {
+        const pct = Math.max(2, 100 * c.capped_score / c.role_max);
+        const flags = [
+          c.was_capped ? '<span class="pill capped">capped</span>' : "",
+          c.max_mismatch ? '<span class="pill mismatch">max mismatch</span>' : "",
+          (!c.was_capped && !c.max_mismatch) ? '<span class="pill ok">ok</span>' : "",
+        ].filter(Boolean).join(" ");
+        return `<tr>
+          <td><b>${esc(c.icon)} ${esc(c.label)}</b><div class="bar"><i style="width:${pct}%"></i></div>
+              ${c.evidence ? `<span style="color:var(--ink-soft);font-size:11px">${esc(c.evidence)}</span>` : ""}</td>
+          <td class="num">${num(c.raw_score)}</td>
+          <td class="num">${num(c.capped_score)}</td>
+          <td class="num">${c.role_max}</td>
+          <td>${flags}</td>
+        </tr>`;
+      }).join("") + `</tbody>`;
+    $("breakdown-panel").hidden = false;
+  }
+
+  function renderClamping(r) {
+    const rows = [
+      ["Base score", `${num(r.base_score)} of ${r.max_base_score}`, "sum of capped categories"],
+      ["Bonus", num(r.bonus_score), "clamped to [0, bonus_max]"],
+      ["Deduction", num(r.deduction_score), "clamped to >= 0"],
+      ["Unclamped total", num(r.unclamped_total), "before final clamp"],
+      ["Final total", num(r.total_score), `clamped to [${r.min_final_score}, ${r.max_final_score}]`],
+    ];
+    $("clamping-table").innerHTML =
+      `<thead><tr><th>Step</th><th>Value</th><th>Rule</th></tr></thead><tbody>` +
+      rows.map(([step, value, rule]) => `<tr>
+        <td><b>${esc(step)}</b></td><td class="num">${esc(value)}</td><td style="color:var(--ink-soft)">${esc(rule)}</td>
+      </tr>`).join("") + `</tbody>`;
+    $("clamping-panel").hidden = false;
+  }
+
+  $("role").addEventListener("change", renderCategories);
+
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $("run");
+    btn.disabled = true; btn.textContent = "Computing…";
+    $("error").hidden = true;
+    const scores = {};
+    document.querySelectorAll(".cat-score").forEach((input) => {
+      scores[input.dataset.key] = { score: Number(input.value), evidence: "" };
+    });
+    try {
+      const res = await fetch("/api/score", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          role_name: $("role").value,
+          scores,
+          bonus: Number($("bonus").value),
+          deduction: Number($("deduction").value),
+        }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || `Request failed (${res.status})`);
+      renderSummary(payload);
+      renderBreakdown(payload);
+      renderClamping(payload);
+      $("raw").textContent = JSON.stringify(payload, null, 2);
+      $("raw-details").hidden = false;
+    } catch (err) {
+      $("error").textContent = err.message;
+      $("error").hidden = false;
+    } finally {
+      btn.disabled = false; btn.textContent = "Compute score";
+    }
+  });
+
+  loadRoles().then(() => $("form").dispatchEvent(new Event("submit")));
+})();
+</script>
+</body>
+</html>

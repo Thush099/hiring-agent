@@ -372,3 +372,19 @@ Please read the [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines on 
 ## License
 
 [MIT](https://github.com/interviewstreet/hiring-agent/blob/master/LICENSE) © HackerRank
+
+## Web UI
+
+A local rubric scoring workbench drives the real score aggregation in the browser:
+
+```bash
+python ui/server.py            # http://127.0.0.1:8133
+```
+
+Enter raw category scores for a role and see exactly how the deterministic aggregation
+works — per-category clamping to role bounds, bonus and deduction handling, and the final
+clamp to the role's score range — with every step visible for audit. The server uses only
+the standard library and calls `compute_evaluation_score()` from `score.py`.
+
+This tool computes and explains a rubric score; it does not make hiring decisions. Any
+outcome requires human review of the evidence behind each score.
