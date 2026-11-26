@@ -18,6 +18,27 @@
     --mono: "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
     --sans: "Avenir Next", "Segoe UI", system-ui, sans-serif;
   }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17191d;
+      --card: #1f2228;
+      --ink: #e8eaee;
+      --ink-soft: #9aa0a9;
+      --rule: #34383f;
+      --good: #5fb98f;
+      --warn: #d2a24e;
+      --bad: #d97b6e;
+      --accent: #6f93c2;
+    }
+    textarea, input[type="text"], input[type="number"], select { background: #23262c; }
+    .notice { background: #2e2921; color: #d9b972; }
+    .error { background: #3a2622; }
+    th { background: #23262c; }
+    .pill.capped { background: #2e2921; }
+    .pill.mismatch { background: #3a2622; }
+    .pill.ok { background: #22322a; }
+    button:hover { background: #33537e; }
+  }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); }
   header { padding: 28px 26px 18px; background: var(--card); border-bottom: 3px solid var(--accent); }
@@ -48,6 +69,17 @@
   button { width: 100%; border: 0; border-radius: 4px; cursor: pointer; padding: 12px 14px; font: 600 14.5px/1 var(--sans); background: var(--accent); color: #fff; }
   button:hover { background: #223b58; }
   button:disabled { opacity: .55; cursor: wait; }
+  .spinner {
+    display: inline-block; width: 1em; height: 1em; margin-left: 8px;
+    border: 2px solid var(--rule); border-top-color: var(--accent);
+    border-radius: 50%; vertical-align: -0.15em;
+    animation: spin 0.8s linear infinite;
+  }
+  .spinner[hidden] { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .spinner { animation: none; }
+  }
   .error { margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--bad); background: #f6e2df; color: var(--bad); font-size: 13px; white-space: pre-wrap; }
 
   .statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
@@ -113,6 +145,7 @@
 
     <div class="btnrow">
       <button type="submit" id="run">Compute score</button>
+      <span class="spinner" hidden aria-hidden="true"></span>
     </div>
     <div class="error" id="error" role="alert" hidden></div>
   </form>
@@ -239,6 +272,9 @@
     e.preventDefault();
     const btn = $("run");
     btn.disabled = true; btn.textContent = "Computing…";
+    btn.form.setAttribute("aria-busy", "true");
+    const spinner = document.querySelector(".spinner");
+    spinner.hidden = false;
     $("error").hidden = true;
     const scores = {};
     document.querySelectorAll(".cat-score").forEach((input) => {
@@ -267,6 +303,8 @@
       $("error").hidden = false;
     } finally {
       btn.disabled = false; btn.textContent = "Compute score";
+      btn.form.setAttribute("aria-busy", "false");
+      spinner.hidden = true;
     }
   });
 
